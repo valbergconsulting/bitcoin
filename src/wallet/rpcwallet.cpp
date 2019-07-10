@@ -1388,8 +1388,21 @@ static void ListTransactions(interfaces::Chain::Lock& locked_chain, CWallet* con
     }
 }
 
-UniValue listtransactions(const JSONRPCRequest& request)
+enum TxSortOrder {
+    orderRECENT_FIRST,
+    orderOLDER_FIRST
+};
+
+static UniValue listtransactions_inner(const JSONRPCRequest& request,
+        TxSortOrder sortOrder)
 {
+    assert(sortOrder == orderRECENT_FIRST
+        || sortOrder == orderOLDER_FIRST);
+
+    std::string helpSort = sortOrder == orderRECENT_FIRST
+        ? "most recent"
+        : "oldest";
+
     std::shared_ptr<CWallet> const wallet = GetWalletForJSONRPCRequest(request);
     CWallet* const pwallet = wallet.get();
 
@@ -1401,7 +1414,7 @@ UniValue listtransactions(const JSONRPCRequest& request)
         throw std::runtime_error(
             RPCHelpMan{"listtransactions",
                 "\nIf a label name is provided, this will return only incoming transactions paying to addresses with the specified label.\n"
-                "\nReturns up to 'count' most recent transactions skipping the first 'from' transactions.\n",
+                "\nReturns up to 'count' " + helpSort + " transactions skipping the first 'from' transactions.\n",
                 {
                     {"label", RPCArg::Type::STR, RPCArg::Optional::OMITTED_NAMED_ARG, "If set, should be a valid label name to return only incoming transactions\n"
             "              with the specified label, or \"*\" to disable filtering and return all transactions."},
@@ -1487,13 +1500,25 @@ UniValue listtransactions(const JSONRPCRequest& request)
 
         const CWallet::TxItems & txOrdered = pwallet->wtxOrdered;
 
-        // iterate backwards until we have nCount items to return:
-        for (CWallet::TxItems::const_reverse_iterator it = txOrdered.rbegin(); it != txOrdered.rend(); ++it)
-        {
-            CWalletTx *const pwtx = (*it).second;
-            ListTransactions(*locked_chain, pwallet, *pwtx, 0, true, ret, filter, filter_label);
-            if ((int)ret.size() >= (nCount+nFrom)) break;
+        // iterate until we have nCount items to return:
+        if (sortOrder == orderRECENT_FIRST) {
+            for (auto it = txOrdered.rbegin(); it != txOrdered.rend(); ++it)
+            {
+                CWalletTx *const pwtx = (*it).second;
+                ListTransactions(*locked_chain, pwallet, *pwtx, 0, true, ret, filter, filter_label);
+                if ((int)ret.size() >= (nCount+nFrom)) break;
+            }
         }
+        else {
+            for (auto it = txOrdered.begin(); it != txOrdered.end(); ++it)
+            {
+                CWalletTx *const pwtx = (*it).second;
+                ListTransactions(*locked_chain, pwallet, *pwtx, 0, true, ret, filter, filter_label);
+                if ((int)ret.size() >= (nCount+nFrom)) break;
+            }
+
+        }
+
     }
 
     // ret is newest to oldest
@@ -1513,7 +1538,9 @@ UniValue listtransactions(const JSONRPCRequest& request)
     if (last != arrTmp.end()) arrTmp.erase(last, arrTmp.end());
     if (first != arrTmp.begin()) arrTmp.erase(arrTmp.begin(), first);
 
-    std::reverse(arrTmp.begin(), arrTmp.end()); // Return oldest to newest
+    if (sortOrder == orderRECENT_FIRST) {
+        std::reverse(arrTmp.begin(), arrTmp.end()); // Return oldest to newest
+    }
 
     ret.clear();
     ret.setArray();
@@ -1521,6 +1548,15 @@ UniValue listtransactions(const JSONRPCRequest& request)
 
     return ret;
 }
+
+UniValue listtransactions(const JSONRPCRequest& request) {
+    return listtransactions_inner(request, orderRECENT_FIRST);
+}
+
+UniValue listtransactionsfrom(const JSONRPCRequest& request) {
+    return listtransactions_inner(request, orderOLDER_FIRST);
+}
+
 
 static UniValue listsinceblock(const JSONRPCRequest& request)
 {
@@ -4183,6 +4219,7 @@ static const CRPCCommand commands[] =
     { "wallet",             "listreceivedbylabel",              &listreceivedbylabel,           {"minconf","include_empty","include_watchonly"} },
     { "wallet",             "listsinceblock",                   &listsinceblock,                {"blockhash","target_confirmations","include_watchonly","include_removed"} },
     { "wallet",             "listtransactions",                 &listtransactions,              {"label|dummy","count","skip","include_watchonly"} },
+    { "wallet",             "listtransactionsfrom",                 &listtransactionsfrom,              {"label|dummy","count","skip","include_watchonly"} },
     { "wallet",             "listunspent",                      &listunspent,                   {"minconf","maxconf","addresses","include_unsafe","query_options"} },
     { "wallet",             "listwalletdir",                    &listwalletdir,                 {} },
     { "wallet",             "listwallets",                      &listwallets,                   {} },
